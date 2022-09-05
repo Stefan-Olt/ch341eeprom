@@ -35,7 +35,7 @@ uint8_t *readbuf = NULL;
 
 int main(int argc, char **argv) {
     int i, eepromsize = 0, bytesread = 0;
-    uint8_t debug = FALSE, verbose = FALSE;
+    uint8_t debug = FALSE, verbose = FALSE, eeprom_bus_addr = EEPROM_I2C_BUS_ADDRESS;
     struct libusb_device_handle *devHandle = NULL;
     char *filename = NULL, eepromname[12], operation = 0;
     uint32_t speed = CH341_I2C_STANDARD_SPEED;
@@ -60,6 +60,7 @@ int main(int argc, char **argv) {
         " -s, --size              size of EEPROM {24c01|24c02|24c04|24c08|24c16|24c32|24c64|24c128|24c256|24c512|24c1024}\n" \
         " -e, --erase             erase EEPROM (fill with 0xff)\n" \
         " -p, --speed             i2c speed (low|fast|high) if different than standard which is default\n" \
+        " -a, --addr              i2c eeprom address (default 0x50)\n" \
         " -w, --write  <filename> write EEPROM with image from filename\n" \
         " -r, --read   <filename> read EEPROM and save image to filename\n" \
         " -V, --verify <filename> verify EEPROM contents against image in filename\n\n" \
@@ -72,6 +73,7 @@ int main(int argc, char **argv) {
         {"erase",   no_argument,       0, 'e'},
         {"size",    required_argument, 0, 's'},
         {"speed",   required_argument, 0, 'p'},
+        {"addr",    required_argument, 0, 'a'},
         {"read",    required_argument, 0, 'r'},
         {"write",   required_argument, 0, 'w'},
         {"verify",  required_argument, 0, 'V'},
@@ -82,7 +84,7 @@ int main(int argc, char **argv) {
 
     while (TRUE) {
         int32_t optidx = 0;
-        int8_t c = getopt_long(argc,argv,"hvdes:p:w:r:V:", longopts, &optidx);
+        int8_t c = getopt_long(argc,argv,"hvdes:p:a:w:r:V:", longopts, &optidx);
         if (c == -1)
             break;
 
@@ -104,6 +106,12 @@ int main(int argc, char **argv) {
                         speed = CH341_I2C_HIGH_SPEED;
                       else
                         speed = CH341_I2C_STANDARD_SPEED;
+                      break;
+            case 'a': eeprom_bus_addr = (uint8_t)strtol(optarg,NULL,0);
+                      if(eeprom_bus_addr==0 || eeprom_bus_addr>127) {
+                        fprintf(stderr, "Invalid i2c eeprom address\n");
+                        goto shutdown;
+					  }
                       break;
             case 'e': if(!operation)
                         operation = 'e';
@@ -160,6 +168,11 @@ int main(int argc, char **argv) {
         goto shutdown;
     }
 
+    if((eeprom_bus_addr&(~eeprom_info.i2c_addr_mask)) != eeprom_bus_addr) {        
+        fprintf(stderr, "Invalid i2c eeprom address for type %s\n", eeprom_info.name);
+        goto shutdown;
+    }
+
     readbuf = (uint8_t *) malloc(MAX_EEPROM_SIZE);   // space to store loaded EEPROM
     if(!readbuf) {
         fprintf(stderr, "Couldnt malloc space needed for EEPROM image\n");
@@ -182,7 +195,7 @@ int main(int argc, char **argv) {
         case 'r':   // read
             memset(readbuf, 0xff, MAX_EEPROM_SIZE);
 
-            if(ch341readEEPROM(devHandle, readbuf, eepromsize, &eeprom_info) < 0) {
+            if(ch341readEEPROM(devHandle, readbuf, eepromsize, &eeprom_info, eeprom_bus_addr) < 0) {
                 fprintf(stderr, "Couldnt read [%d] bytes from [%s] EEPROM\n", eepromsize, eepromname);
                 goto shutdown;
             }
@@ -212,7 +225,7 @@ int main(int argc, char **argv) {
         case 'V':   // verify
             memset(readbuf, 0xff, MAX_EEPROM_SIZE);
 
-            if(ch341readEEPROM(devHandle, readbuf, eepromsize, &eeprom_info) < 0) {
+            if(ch341readEEPROM(devHandle, readbuf, eepromsize, &eeprom_info, eeprom_bus_addr) < 0) {
                 fprintf(stderr, "Couldnt read [%d] bytes from [%s] EEPROM\n", eepromsize, eepromname);
                 goto shutdown;
             }
@@ -273,7 +286,7 @@ int main(int argc, char **argv) {
             if(bytesread > eepromsize)
                 fprintf(stdout, "Truncated to [%d] bytes for [%s] EEPROM\n", eepromsize, eepromname);
 
-            if(ch341writeEEPROM(devHandle, readbuf, eepromsize, &eeprom_info) < 0) {
+            if(ch341writeEEPROM(devHandle, readbuf, eepromsize, &eeprom_info, eeprom_bus_addr) < 0) {
                 fprintf(stderr,"Failed to write [%d] bytes from [%s] to [%s] EEPROM\n", eepromsize, filename, eepromname);
                 goto shutdown;
             }
@@ -281,7 +294,7 @@ int main(int argc, char **argv) {
             break;
         case 'e': // erase
             memset(readbuf, 0xff, MAX_EEPROM_SIZE);
-            if(ch341writeEEPROM(devHandle, readbuf, eepromsize, &eeprom_info) < 0) {
+            if(ch341writeEEPROM(devHandle, readbuf, eepromsize, &eeprom_info, eeprom_bus_addr) < 0) {
                 fprintf(stderr,"Failed to erase [%d] bytes of [%s] EEPROM\n", eepromsize, eepromname);
                 goto shutdown;
             }

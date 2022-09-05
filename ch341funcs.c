@@ -28,7 +28,7 @@
 #include "ch341eeprom.h"
 
 extern FILE *debugout, *verbout;
-uint32_t getnextpkt;                            // set by the callback function
+int32_t  getnextpkt;                            // set by the callback function
 uint32_t syncackpkt;                            // synch / ack flag used by BULK OUT cb function
 uint32_t byteoffset;
 
@@ -66,10 +66,10 @@ struct libusb_device_handle *ch341configure(uint16_t vid, uint16_t pid) {
     #endif
 
     fprintf(verbout, "Searching USB buses for WCH CH341a i2c EEPROM programmer [%04x:%04x]\n",
-            USB_LOCK_VENDOR, USB_LOCK_PRODUCT);
+            vid, pid);
 
-    if(!(devHandle = libusb_open_device_with_vid_pid(NULL, USB_LOCK_VENDOR, USB_LOCK_PRODUCT))) {
-        fprintf(stderr, "Couldn't open device [%04x:%04x]\n", USB_LOCK_VENDOR, USB_LOCK_PRODUCT);
+    if(!(devHandle = libusb_open_device_with_vid_pid(NULL, vid, pid))) {
+        fprintf(stderr, "Couldn't open device [%04x:%04x]\n", vid, pid);
         return NULL;
     }
 
@@ -78,10 +78,10 @@ struct libusb_device_handle *ch341configure(uint16_t vid, uint16_t pid) {
         return NULL;
     }
 
-    fprintf(verbout, "Found [%04x:%04x] as device [%d] on USB bus [%d]\n", USB_LOCK_VENDOR, USB_LOCK_PRODUCT,
+    fprintf(verbout, "Found [%04x:%04x] as device [%d] on USB bus [%d]\n", vid, pid,
         libusb_get_device_address(dev), libusb_get_bus_number(dev));
 
-    fprintf(verbout, "Opened device [%04x:%04x]\n", USB_LOCK_VENDOR, USB_LOCK_PRODUCT);
+    fprintf(verbout, "Opened device [%04x:%04x]\n", vid, pid);
 
 
     if(libusb_kernel_driver_active(devHandle, DEFAULT_INTERFACE)) {
@@ -162,7 +162,7 @@ int32_t ch341setstream(struct libusb_device_handle *devHandle, uint32_t speed) {
     return 0;
 }
 
-size_t ch341ReadCmdMarshall(uint8_t *buffer, uint32_t addr, struct EEPROM *eeprom_info) {
+size_t ch341ReadCmdMarshall(uint8_t *buffer, uint32_t addr, struct EEPROM *eeprom_info, uint8_t eeprom_bus_addr) {
     uint8_t *ptr = buffer;
 
     // Frame 1. Program data address, and read 32 bytes.
@@ -174,18 +174,18 @@ size_t ch341ReadCmdMarshall(uint8_t *buffer, uint32_t addr, struct EEPROM *eepro
     if ((*eeprom_info).addr_size >= 2) {
         // 24C32 and more
         msb_addr = addr>>16 & (*eeprom_info).i2c_addr_mask;
-        *ptr++ = (EEPROM_I2C_BUS_ADDRESS | msb_addr)<<1; // 3
+        *ptr++ = (eeprom_bus_addr | msb_addr)<<1; // 3
         *ptr++ = (addr>>8 & 0xFF); // 4
         *ptr++ = (addr>>0 & 0xFF); // 5
     } else {
         // 24C16 and less
         msb_addr = addr>>8 & (*eeprom_info).i2c_addr_mask;
-        *ptr++ = (EEPROM_I2C_BUS_ADDRESS | msb_addr)<<1; // 3
+        *ptr++ = (eeprom_bus_addr | msb_addr)<<1; // 3
         *ptr++ = (addr>>0 & 0xFF); // 4
     }
     *ptr++ = mCH341A_CMD_I2C_STM_STA; // 6/5
     *ptr++ = mCH341A_CMD_I2C_STM_OUT | 1; // 7/6
-    *ptr++ = (EEPROM_I2C_BUS_ADDRESS | msb_addr)<<1 | 1; // 8/7: Read command
+    *ptr++ = (eeprom_bus_addr | msb_addr)<<1 | 1; // 8/7: Read command
 
     // Read 32 bytes
     *ptr++ = mCH341A_CMD_I2C_STM_IN | 32; // 9/8
@@ -217,7 +217,7 @@ size_t ch341ReadCmdMarshall(uint8_t *buffer, uint32_t addr, struct EEPROM *eepro
 // --------------------------------------------------------------------------
 // ch341readEEPROM()
 //      read n bytes from device (in packets of 32 bytes)
-int32_t ch341readEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer, uint32_t bytestoread, struct EEPROM *eeprom_info) {
+int32_t ch341readEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer, uint32_t bytestoread, struct EEPROM *eeprom_info, uint8_t eeprom_bus_addr) {
 
     uint8_t ch341outBuffer[EEPROM_READ_BULKOUT_BUF_SZ];
     uint8_t ch341inBuffer[IN_BUF_SZ];               // 0x100 bytes
@@ -239,7 +239,7 @@ int32_t ch341readEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer,
     fprintf(debugout, "Allocated USB transfer structures\n");
 
     memset(ch341inBuffer, 0, EEPROM_READ_BULKIN_BUF_SZ);
-    xfer_size = ch341ReadCmdMarshall(ch341outBuffer, 0, eeprom_info); // Fill output buffer
+    xfer_size = ch341ReadCmdMarshall(ch341outBuffer, 0, eeprom_info, eeprom_bus_addr); // Fill output buffer
 
     libusb_fill_bulk_transfer(xferBulkIn,  devHandle, BULK_READ_ENDPOINT, ch341inBuffer,
         EEPROM_READ_BULKIN_BUF_SZ, cbBulkIn, NULL, DEFAULT_TIMEOUT);
@@ -286,7 +286,7 @@ int32_t ch341readEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer,
                 fprintf(debugout, "\nSubmitting next transfer request to BULK OUT endpoint\n");
                 readpktcount = 0;
 
-                ch341ReadCmdMarshall(ch341outBuffer, byteoffset, eeprom_info); // Fill output buffer
+                ch341ReadCmdMarshall(ch341outBuffer, byteoffset, eeprom_info, eeprom_bus_addr); // Fill output buffer
                 libusb_fill_bulk_transfer(xferBulkOut, devHandle, BULK_WRITE_ENDPOINT, ch341outBuffer,
                                     EEPROM_READ_BULKOUT_BUF_SZ, cbBulkOut, NULL, DEFAULT_TIMEOUT);
 
@@ -337,13 +337,13 @@ void cbBulkOut(struct libusb_transfer *transfer) {
 // --------------------------------------------------------------------------
 // ch341writeEEPROM()
 //      write n bytes to 24c32/24c64 device (in packets of 32 bytes)
-int32_t ch341writeEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer, uint32_t bytesum, struct EEPROM *eeprom_info) {
+int32_t ch341writeEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer, uint32_t bytesum, struct EEPROM *eeprom_info, uint8_t eeprom_bus_addr) {
 
     uint8_t ch341outBuffer[512/*EEPROM_WRITE_BUF_SZ*/];
     uint8_t *outptr, *bufptr;
     uint8_t i2cCmdBuffer[256];
-    int32_t ret = 0, i;
-    uint32_t byteoffset = 0;
+    int32_t ret = 0;
+    uint32_t byteoffset = 0, i;
     uint32_t bytes = bytesum;
     uint8_t addrbytecount = (*eeprom_info).addr_size+1;  // 24c32 and 24c64 (and other 24c??) use 3 bytes for addressing
     int32_t actuallen = 0;
@@ -354,10 +354,10 @@ int32_t ch341writeEEPROM(struct libusb_device_handle *devHandle, uint8_t *buffer
     while(bytes) {
         outptr = i2cCmdBuffer;
         if ((*eeprom_info).addr_size >= 2) {
-            *outptr++ = (uint8_t) (0xa0 | (byteoffset >> 16 & (*eeprom_info).i2c_addr_mask)<<1);  // EEPROM device address
+            *outptr++ = (uint8_t) ((eeprom_bus_addr<<1) | (byteoffset >> 16 & (*eeprom_info).i2c_addr_mask)<<1);  // EEPROM device address
             *outptr++ = (uint8_t) (byteoffset >> 8 & 0xff);     // MSB (big-endian) byte address
         } else {
-            *outptr++ = (uint8_t) (0xa0 | (byteoffset >> 8 & (*eeprom_info).i2c_addr_mask)<<1);  // EEPROM device address
+            *outptr++ = (uint8_t) ((eeprom_bus_addr<<1) | (byteoffset >> 8 & (*eeprom_info).i2c_addr_mask)<<1);  // EEPROM device address
         }
         *outptr++ = (uint8_t) (byteoffset & 0xff);          // LSB of 16-bit    byte address
 

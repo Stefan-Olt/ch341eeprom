@@ -348,7 +348,7 @@ struct EEPROM {
     uint8_t i2c_addr_mask;
 };
 
-const static struct EEPROM eepromlist[] = {
+static const struct EEPROM eepromlist[] = {
   { "24c01",   128,     8,  1, 0x00}, // 16 pages of 8 bytes each = 128 bytes
   { "24c02",   256,     8,  1, 0x00}, // 32 pages of 8 bytes each = 256 bytes
   { "24c04",   512,    16,  1, 0x01}, // 32 pages of 16 bytes each = 512 bytes
@@ -360,13 +360,13 @@ const static struct EEPROM eepromlist[] = {
   { "24c256",  32768,  32/*64*/,  2, 0x00},
   { "24c512",  65536,  32/*128*/, 2, 0x00},
   { "24c1024", 131072, 32/*128*/, 2, 0x01},
-  { 0, 0, 0, 0 }
+  { NULL, 0, 0, 0, 0 }
 };
 
 extern uint8_t *readbuf;
 
-int32_t ch341readEEPROM(struct libusb_device_handle *devHandle, uint8_t *buf, uint32_t bytes, struct EEPROM* eeprom_info);
-int32_t ch341writeEEPROM(struct libusb_device_handle *devHandle, uint8_t *buf, uint32_t bytes, struct EEPROM* eeprom_info);
+int32_t ch341readEEPROM(struct libusb_device_handle *devHandle, uint8_t *buf, uint32_t bytes, struct EEPROM* eeprom_info, uint8_t eeprom_bus_addr);
+int32_t ch341writeEEPROM(struct libusb_device_handle *devHandle, uint8_t *buf, uint32_t bytes, struct EEPROM* eeprom_info, uint8_t eeprom_bus_addr);
 struct libusb_device_handle *ch341configure(uint16_t vid, uint16_t pid);
 int32_t ch341setstream(struct libusb_device_handle *devHandle, uint32_t speed);
 int32_t parseEEPsize(char* eepromname, struct EEPROM *eeprom);

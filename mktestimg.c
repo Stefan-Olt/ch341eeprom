@@ -27,7 +27,7 @@ int main(int argc, char **argv)
 {
     int ret;
 
-    FILE *out=fopen( "test.bin", "w" );
+    FILE *out =fopen( ((argc < 2) ? "test.bin" : argv[1]), "w" );
     /*create and open file test.bin*/
 
     int i, j, k;
